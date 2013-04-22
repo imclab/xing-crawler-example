@@ -89,9 +89,9 @@ public class WebServer extends Thread {
 
 					// For HTTP/1.0 or later send a MIME header
 					if (request.indexOf("HTTP/") != -1) {
-						final String headerString = "HTTP/1.0 200 OK" + NL
-								+ "Server: YacaAgent 1.0" + NL + "Content-length: "
-								+ content.length + NL + "Content-type: text/html" + NL + NL;
+						final String headerString = "HTTP/1.0 200 OK" + NL + "Server: YacaAgent 1.0" + NL
+								+ "Content-length: " + content.length + NL + "Content-type: text/html" + NL
+								+ NL;
 						final byte[] header = headerString.getBytes("ASCII");
 						out.write(header);
 					}

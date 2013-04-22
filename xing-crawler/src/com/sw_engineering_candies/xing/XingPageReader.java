@@ -44,6 +44,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
@@ -54,6 +55,7 @@ import nu.validator.htmlparser.dom.HtmlDocumentBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
@@ -67,50 +69,51 @@ import com.meterware.httpunit.WebResponse;
 
 public class XingPageReader {
 
+	/** you may change log4j.properties */
 	private static final Log LOGGER = LogFactory.getLog(XingPageReader.class);
 
-	private static final int MAX_NUMBER_OF_DIRECT_CONTACT = 1000;
-
-	final String LOGIN_URL = "https://www.xing.com";
-
-	private static final String CONTACT_URL_TEMPLATE = "https://www.xing.com/app/profile?op=contacts;name=%s;offset=%d";
-
-	private static final String XPATH_GET_CONTACTS = "//*[@id=\"profile-contacts\"]/*[local-name()='tbody']/*"
-			+ "[local-name()='tr']/*[local-name()='td']/*[local-name()='strong']/*[local-name()='a']";
-
+	/** my password used for XING login */
 	public static String pwd;
 
+	/** my user name used for XING login */
 	public static String userName;
 
+	/** my name in the URL for accessing the XING profile */
 	public static String name;
 
-	final WebConversation conversation = new WebConversation();
-
+	/** all crawled data for creating the visualization of the network graph */
 	private final Model model;
 
+	/** context for a series of HTTP requests */
+	final WebConversation conversation = new WebConversation();
+
 	public XingPageReader(final Model analyser) {
-		this.model = analyser;
+		model = analyser;
 	}
 
 	public void run() {
 
-		if (readProperties() && login()) {
-
-			List<String> contacts;
-			contacts = crawlAllMyContacts();
-
-			if (!contacts.isEmpty()) {
-				for (String contact : contacts) {
-					crawlInderectContacts(contact, contacts);
-				}
-			}
-			
-			LOGGER.info("ready");
+		if (!readProperties()) {
+			LOGGER.error("unable to read ini file with login information");
+			System.exit(0);
 		}
+
+		if (!login()) {
+			LOGGER.error("unable to login (xing.userId or xing.userPwd may be wrong)");
+			System.exit(0);
+		}
+
+		final List<String> contacts = crawlAllMyContacts();
+		if (!contacts.isEmpty()) {
+			for (final String contact : contacts) {
+				crawlInderectContacts(contact, contacts);
+			}
+		}
+		LOGGER.info("crawling is ready");
 	}
 
 	private boolean readProperties() {
-		java.util.Properties prop = new Properties();
+		final java.util.Properties prop = new Properties();
 		try {
 			prop.load(new FileInputStream("XingCrawler.ini"));
 			if (prop.containsKey("https.proxySet")) {
@@ -129,56 +132,58 @@ public class XingPageReader {
 			LOGGER.info("file 'XingCrawler.ini' read");
 			return true;
 
-		} catch (FileNotFoundException e1) {
+		} catch (final FileNotFoundException e1) {
 			LOGGER.error(e1.getMessage());
-		} catch (IOException e1) {
+		} catch (final IOException e1) {
 			LOGGER.error(e1.getMessage());
 		}
+
 		return false;
 	}
 
 	public boolean login() {
-		LOGGER.debug("requestedURL=" + LOGIN_URL);
-
-		final WebRequest req = new GetMethodWebRequest(LOGIN_URL);
+		LOGGER.info("login to XING ");
+		boolean result = false;
+		final WebRequest req = new GetMethodWebRequest("https://www.xing.com");
 		try {
-			WebResponse response;
 			HttpUnitOptions.setScriptingEnabled(true);
 			HttpUnitOptions.setExceptionsThrownOnScriptError(false);
 			final WebResponse res = conversation.getResource(req);
 			final WebForm form = res.getForms()[0];
 			form.setParameter("login_form[username]", userName);
 			form.setParameter("login_form[password]", pwd);
-			response = form.submit();
-			return (200 == response.getResponseCode());
+			WebResponse response = form.submit();
+			result = "/app/user".equalsIgnoreCase(response.getURL().getPath());
 		} catch (final IOException e) {
 			LOGGER.error(e.getMessage());
 		} catch (final SAXException e) {
 			LOGGER.error(e.getMessage());
 		}
-		return false;
+		return result;
 	}
 
 	public List<String> crawlAllMyContacts() {
-		List<String> myContacts = new ArrayList<String>();
-
-		LOGGER.info("crawl all my contacts (this may last some minutes) ");
-		for (int offset = 0; offset < MAX_NUMBER_OF_DIRECT_CONTACT; offset += 10) {
-
-			String currentContactURL = String.format(CONTACT_URL_TEMPLATE, name, offset);
-			NodeList nodes = crawlCurrentContacts(currentContactURL, XPATH_GET_CONTACTS);
+		LOGGER.info("crawl all my XING contacts (this may last some minutes) ");
+		final List<String> result = new ArrayList<String>();
+		int offset = 0;
+		boolean hasMoreContacts = true;
+		do {
+			final String currentContactURL = String.format(Constants.MY_CONTACTS_URL, name, offset);
+			final NodeList nodes = crawlCurrentContacts(currentContactURL, Constants.XPATH_MY_CONTACTS);
 			if (null != nodes && 0 < nodes.getLength()) {
 				for (int i = 0; i < nodes.getLength(); i++) {
-					String name = nodes.item(i).getAttributes().getNamedItem("href").getNodeValue().split("/")[2];
-					myContacts.add(name);
+					final Node namedItem = nodes.item(i).getAttributes().getNamedItem("href");
+					final String name = namedItem.getNodeValue().split("/")[2];
+					result.add(name);
 					LOGGER.debug(i + " add '" + name);
 				}
-
+				offset += 10;
 			} else {
-				break;
+				hasMoreContacts = false;
 			}
-		}
-		return myContacts;
+		} while (hasMoreContacts);
+
+		return result;
 	}
 
 	public NodeList crawlCurrentContacts(final String requestedURL, String xpathExpression) {
@@ -187,22 +192,17 @@ public class XingPageReader {
 		try {
 			final WebResponse response = conversation.getResource(req);
 			if (200 == response.getResponseCode()) {
-
-				HtmlDocumentBuilder b = new HtmlDocumentBuilder();
-				org.w3c.dom.Document doc = b.parse(response.getInputStream());
-				XPath xpath = XPathFactory.newInstance().newXPath();
+				final HtmlDocumentBuilder b = new HtmlDocumentBuilder();
+				final org.w3c.dom.Document doc = b.parse(response.getInputStream());
+				final XPath xpath = XPathFactory.newInstance().newXPath();
 				final Element document = doc.getDocumentElement();
-				NodeList nodes = (NodeList) xpath.evaluate(xpathExpression, document, XPathConstants.NODESET);
-
-				LOGGER.debug("childNodes  =" + (null != nodes ? nodes.getLength() : 0));
-				return nodes;
+				return (NodeList) xpath.evaluate(xpathExpression, document, XPathConstants.NODESET);
 			}
-
 		} catch (final IOException e) {
 			LOGGER.error(e.getMessage());
 		} catch (final SAXException e) {
 			LOGGER.error(e.getMessage());
-		} catch (XPathExpressionException e) {
+		} catch (final XPathExpressionException e) {
 			LOGGER.error(e.getMessage());
 		}
 
@@ -210,72 +210,75 @@ public class XingPageReader {
 	}
 
 	public void crawlInderectContacts(final String name, List<String> myContacts) {
-		// this site uses maximal 10 items per page
-		for (int offset = 0; offset < MAX_NUMBER_OF_DIRECT_CONTACT; offset += 10) {
-			LOGGER.info("crawl all inderect contacts of " + name);
-			final String ContactURL = "https://www.xing.com/app/profile?op=showroutes;except=1;name=" + name
-					+ ";offset=" + offset;
-
-			String xpathExpression = "//*[@id=\"maincontent\"]/*[local-name()='ul']";
-			final NodeList allElements = crawlCurrentContacts(ContactURL, xpathExpression);
+		LOGGER.info("crawl all inderect contacts of " + name);
+		int offset = 0;
+		boolean hasMoreContacts = true;
+		do {
+			final String currentContactURL = String.format(Constants.IDIRECT_CONTACTS_URL, name, offset);
+			final NodeList allElements;
+			allElements = crawlCurrentContacts(currentContactURL, Constants.XPATH_INDIRECT_CONTACTS);
 			if (null != allElements) {
-				boolean hasPageinator = false;
-				for (int i = 0; i < allElements.getLength(); i++) {
-					final Node item = allElements.item(i);
-					final List<Model.Item> listItems = new ArrayList<Model.Item>();
+				hasMoreContacts = analyseAllElements(myContacts, allElements);
+			}
+			offset += 10;
+		} while (hasMoreContacts);
+	}
 
-					final String classAttribute = item.getAttributes().getNamedItem("class").getNodeValue();
-					if (classAttribute.startsWith("image-list contact-path-list contact-path-list-")) {
-						final NodeList nodes = item.getChildNodes();
-						for (int col = 3; col < nodes.getLength(); col++) {
-							final Node item2 = nodes.item(col);
-							if ("LI".equalsIgnoreCase(item2.getNodeName())) {
-								final NodeList nodes3 = item2.getChildNodes();
-								for (int attr = 0; attr < nodes3.getLength(); attr++) {
-									final Node item3 = nodes3.item(attr);
-									if ("A".equalsIgnoreCase(item3.getNodeName())) {
-										final String nodeValue = item3.getAttributes().getNamedItem("href")
-												.getNodeValue().split("/")[2];
-										final String item3Class = item3.getAttributes().getNamedItem("class")
-												.getNodeValue();
-										if ("user-name".equalsIgnoreCase(item3Class)) {
-											final Model.Item entrySource = model.new Item();
-											entrySource.setNodeName(nodeValue.replace('_', ' '));
-											entrySource
-													.setClusterName(myContacts.contains(nodeValue) ? "Level-1-Contacts"
-															: "Level-" + col / 2 + "-Contacts");
-											listItems.add(entrySource);
-											LOGGER.debug("found " + nodeValue);
-										}
+	private boolean analyseAllElements(List<String> myContacts, final NodeList elements) {
+		boolean hasPageinator = false;
+		for (int i = 0; i < elements.getLength(); i++) {
+
+			// This is an indirect connection
+			final Node itemNode = elements.item(i);
+			final String itemAttr = itemNode.getAttributes().getNamedItem("class").getNodeValue();
+			if (itemAttr.startsWith("image-list contact-path-list contact-path-list-")) {
+				final List<Model.Item> listItems = new ArrayList<Model.Item>();
+				final NodeList nodes = itemNode.getChildNodes();
+				for (int col = 3; col < nodes.getLength(); col++) {
+					final Node item2 = nodes.item(col);
+					if ("LI".equalsIgnoreCase(item2.getNodeName())) {
+						final NodeList nodes3 = item2.getChildNodes();
+						for (int attr = 0; attr < nodes3.getLength(); attr++) {
+							final Node item3 = nodes3.item(attr);
+							if ("A".equalsIgnoreCase(item3.getNodeName())) {
+								NamedNodeMap attr3 = item3.getAttributes();
+								final String nodeValue = attr3.getNamedItem("href").getNodeValue().split("/")[2];
+								final String item3Class = attr3.getNamedItem("class").getNodeValue();
+								if ("user-name".equalsIgnoreCase(item3Class)) {
+									final Model.Item entrySource = model.new Item();
+									entrySource.setNodeName(nodeValue.replace('_', ' '));
+									if (myContacts.contains(nodeValue)) {
+										entrySource.setClusterName("Level-1-Contacts");
+									} else {
+										entrySource.setClusterName("Level-" + col / 2 + "-Contacts");
 									}
-
-								}
-							}
-						}
-						model.append(listItems);
-
-						if (classAttribute.equals("pagination")) {
-							hasPageinator = true;
-							final NodeList nodes2 = item.getChildNodes();
-							for (int f = 0; f < nodes2.getLength(); f++) {
-								final NodeList nodes3 = nodes2.item(f).getChildNodes();
-								for (int g = 0; g < nodes3.getLength(); g++) {
-									if (nodes3.item(g).hasChildNodes()) {
-										final Node firstChild = nodes3.item(g).getFirstChild();
-										if ("Next".equalsIgnoreCase(firstChild.getNodeValue())
-												&& "SPAN".equals(nodes3.item(g).getLocalName())) {
-											offset = MAX_NUMBER_OF_DIRECT_CONTACT;
-										}
-									}
+									listItems.add(entrySource);
+									LOGGER.debug("found " + nodeValue);
 								}
 							}
 						}
 					}
 				}
-				if (!hasPageinator) {
-					offset = MAX_NUMBER_OF_DIRECT_CONTACT;
+				model.append(listItems);
+			}
+
+			// If we have more than one page with indirect contacts
+			if (itemAttr.equals("pagination")) {
+				hasPageinator = false;
+				final NodeList nodes2 = itemNode.getChildNodes();
+				for (int f = 0; f < nodes2.getLength(); f++) {
+					final Node currentChild = nodes2.item(f);
+					NamedNodeMap attributes = currentChild.getAttributes();
+					if (null != attributes) {
+						Node namedItem = attributes.getNamedItem("class");
+						if (null != namedItem && "next".equalsIgnoreCase(namedItem.getNodeValue())) {
+							hasPageinator = true;
+							break;
+						}
+					}
 				}
 			}
 		}
+		return hasPageinator;
 	}
 }

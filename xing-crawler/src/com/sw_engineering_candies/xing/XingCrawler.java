@@ -54,9 +54,9 @@ public class XingCrawler {
 			final InetAddress addr = InetAddress.getLocalHost();
 			hostname = addr.getCanonicalHostName();
 		} catch (final UnknownHostException e) {
-			LOGGER.error(e.getMessage() );
+			LOGGER.error(e.getMessage());
 		}
-		LOGGER.info("start http://" + hostname + ':' + 8080 +"/index.html");
+		LOGGER.info("start http://" + hostname + ':' + 8080 + "/index.html");
 		final Thread serverThread = new WebServer(8080, model);
 		serverThread.start();
 	}

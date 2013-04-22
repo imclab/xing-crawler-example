@@ -109,9 +109,8 @@ public class Model {
 		final String targetKey = targetEntry.getNodeName();
 		if (!nodes.containsKey(targetKey)) {
 			nodeIds.add(targetKey);
-			final String nodeString = "\t{\"id\":" + nodeIds.indexOf(targetKey)
-					+ ", \"clusterId\":" + clusterIds.indexOf(targetClusterKey) + ", \"name\":\""
-					+ targetKey + "\"}";
+			final String nodeString = "\t{\"id\":" + nodeIds.indexOf(targetKey) + ", \"clusterId\":"
+					+ clusterIds.indexOf(targetClusterKey) + ", \"name\":\"" + targetKey + "\"}";
 			nodes.put(targetKey, nodeString);
 		}
 
@@ -128,9 +127,8 @@ public class Model {
 		final String sourceKey = sourceEntry.getNodeName();
 		if (!nodes.containsKey(sourceKey)) {
 			nodeIds.add(sourceKey);
-			final String nodeString = "\t{\"id\":" + nodeIds.indexOf(sourceKey)
-					+ ", \"clusterId\":" + clusterIds.indexOf(sourceClusterKey) + ", \"name\":\""
-					+ sourceKey + "\" }";
+			final String nodeString = "\t{\"id\":" + nodeIds.indexOf(sourceKey) + ", \"clusterId\":"
+					+ clusterIds.indexOf(sourceClusterKey) + ", \"name\":\"" + sourceKey + "\" }";
 			nodes.put(sourceKey, nodeString);
 		}
 
@@ -140,8 +138,7 @@ public class Model {
 		if (!links.containsKey(keyLink) && !links.containsKey(keyLinkBack)) {
 			linkIds.add(keyLink);
 			final String nodeString = "\t{\"id\":" + linkIds.indexOf(keyLink) + ", \"sourceId\":"
-					+ nodeIds.indexOf(sourceKey) + ", \"targetId\":" + nodeIds.indexOf(targetKey)
-					+ "}";
+					+ nodeIds.indexOf(sourceKey) + ", \"targetId\":" + nodeIds.indexOf(targetKey) + "}";
 			links.put(keyLink, nodeString);
 		}
 	}
@@ -196,10 +193,10 @@ public class Model {
 		fw.append(NL);
 
 		final StringBuffer message = new StringBuffer(200);
-		message.append(" #clusters=").append(clusterIds.size());
+		message.append("web request for model #clusters=").append(clusterIds.size());
 		message.append(", #nodes=").append(nodeIds.size());
 		message.append(", #links=").append(links.size());
-		LOGGER.info(message + NL);
+		LOGGER.info(message);
 		lastLength = fw.length();
 		return fw;
 	}

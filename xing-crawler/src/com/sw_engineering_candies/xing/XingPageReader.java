@@ -53,11 +53,11 @@ import nu.validator.htmlparser.dom.HtmlDocumentBuilder;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-import com.gargoylesoftware.htmlunit.WebClient;
 import com.meterware.httpunit.GetMethodWebRequest;
 import com.meterware.httpunit.HttpUnitOptions;
 import com.meterware.httpunit.WebConversation;
@@ -69,21 +69,22 @@ public class XingPageReader {
 
 	private static final Log LOGGER = LogFactory.getLog(XingPageReader.class);
 
-	private static final String NL = System.getProperty("line.separator");
+	private static final int MAX_NUMBER_OF_DIRECT_CONTACT = 1000;
 
-	private static final int MAX_NUMBER_OF_DIRECT_CONTACT = 160;
+	final String LOGIN_URL = "https://www.xing.com";
 
-	public static  String pwd;
+	private static final String CONTACT_URL_TEMPLATE = "https://www.xing.com/app/profile?op=contacts;name=%s;offset=%d";
 
-	public static  String userName;
-	
-	public static  String name;
+	private static final String XPATH_GET_CONTACTS = "//*[@id=\"profile-contacts\"]/*[local-name()='tbody']/*"
+			+ "[local-name()='tr']/*[local-name()='td']/*[local-name()='strong']/*[local-name()='a']";
 
-	final WebClient webClient = new WebClient();
+	public static String pwd;
+
+	public static String userName;
+
+	public static String name;
 
 	final WebConversation conversation = new WebConversation();
-
-	List<String> myContacts = new ArrayList<String>();
 
 	private final Model model;
 
@@ -92,21 +93,54 @@ public class XingPageReader {
 	}
 
 	public void run() {
-		readProperties();
-		login();
-		crawlAllMyContacts();
-		crawlAllMyIndirectContacts();
+
+		if (readProperties() && login()) {
+
+			List<String> contacts;
+			contacts = crawlAllMyContacts();
+
+			if (!contacts.isEmpty()) {
+				for (String contact : contacts) {
+					crawlInderectContacts(contact, contacts);
+				}
+			}
+			
+			LOGGER.info("ready");
+		}
 	}
 
-	public int login() {
-		
-	
-		
-		final String requestedURL = "https://www.xing.com";
-		LOGGER.info("requestedURL=" + requestedURL + NL);
-		final WebRequest req = new GetMethodWebRequest(requestedURL);
-		final NodeList childNodes = null;
-		int responseCode = 0;
+	private boolean readProperties() {
+		java.util.Properties prop = new Properties();
+		try {
+			prop.load(new FileInputStream("XingCrawler.ini"));
+			if (prop.containsKey("https.proxySet")) {
+				System.setProperty("https.proxySet", prop.getProperty("https.proxySet"));
+			}
+			if (prop.containsKey("https.proxyHost")) {
+				System.setProperty("https.proxyHost", prop.getProperty("https.proxyHost"));
+			}
+			if (prop.containsKey("https.proxyPort")) {
+				System.setProperty("https.proxyPort", prop.getProperty("https.proxyPort"));
+			}
+			userName = prop.getProperty("xing.userId").trim();
+			pwd = prop.getProperty("xing.userPwd").trim();
+			name = prop.getProperty("xing.userName").trim();
+
+			LOGGER.info("file 'XingCrawler.ini' read");
+			return true;
+
+		} catch (FileNotFoundException e1) {
+			LOGGER.error(e1.getMessage());
+		} catch (IOException e1) {
+			LOGGER.error(e1.getMessage());
+		}
+		return false;
+	}
+
+	public boolean login() {
+		LOGGER.debug("requestedURL=" + LOGIN_URL);
+
+		final WebRequest req = new GetMethodWebRequest(LOGIN_URL);
 		try {
 			WebResponse response;
 			HttpUnitOptions.setScriptingEnabled(true);
@@ -116,43 +150,39 @@ public class XingPageReader {
 			form.setParameter("login_form[username]", userName);
 			form.setParameter("login_form[password]", pwd);
 			response = form.submit();
-			responseCode = response.getResponseCode();
+			return (200 == response.getResponseCode());
 		} catch (final IOException e) {
-			e.printStackTrace();
+			LOGGER.error(e.getMessage());
 		} catch (final SAXException e) {
-			e.printStackTrace();
+			LOGGER.error(e.getMessage());
 		}
-		LOGGER.info("childNodes =" + (null != childNodes ? childNodes.getLength() : 0) + NL);
-		return responseCode;
+		return false;
 	}
 
-	private void readProperties() {
-		java.util.Properties prop = new Properties();		
-	    try {
-			prop.load(new FileInputStream("XingCrawler.ini"));
-			if (prop.containsKey("https.proxySet") ) {
-				System.setProperty("https.proxySet", prop.getProperty("https.proxySet"));
+	public List<String> crawlAllMyContacts() {
+		List<String> myContacts = new ArrayList<String>();
+
+		LOGGER.info("crawl all my contacts (this may last some minutes) ");
+		for (int offset = 0; offset < MAX_NUMBER_OF_DIRECT_CONTACT; offset += 10) {
+
+			String currentContactURL = String.format(CONTACT_URL_TEMPLATE, name, offset);
+			NodeList nodes = crawlCurrentContacts(currentContactURL, XPATH_GET_CONTACTS);
+			if (null != nodes && 0 < nodes.getLength()) {
+				for (int i = 0; i < nodes.getLength(); i++) {
+					String name = nodes.item(i).getAttributes().getNamedItem("href").getNodeValue().split("/")[2];
+					myContacts.add(name);
+					LOGGER.debug(i + " add '" + name);
+				}
+
+			} else {
+				break;
 			}
-			if (prop.containsKey("https.proxyHost") ) {
-				System.setProperty("https.proxyHost", prop.getProperty("https.proxyHost"));
-			}
-			if (prop.containsKey("https.proxyPort") ) {
-				System.setProperty("https.proxyPort", prop.getProperty("https.proxyPort"));
-			}
-		
-			userName = prop.getProperty("xing.userId").trim();
-			pwd   = prop.getProperty("xing.userPwd").trim();
-			name = prop.getProperty("xing.userName").trim();
-			
-		} catch (FileNotFoundException e1) {
-			LOGGER.error(e1.getMessage());
-		} catch (IOException e1) {
-			LOGGER.error(e1.getMessage());			
 		}
+		return myContacts;
 	}
 
-	public NodeList readNodeListXING(final String requestedURL, String xpathExpression) {
-		LOGGER.info("requestedURL=" + requestedURL + NL);
+	public NodeList crawlCurrentContacts(final String requestedURL, String xpathExpression) {
+		LOGGER.debug("requestedURL=" + requestedURL);
 		final WebRequest req = new GetMethodWebRequest(requestedURL);
 		try {
 			final WebResponse response = conversation.getResource(req);
@@ -161,67 +191,33 @@ public class XingPageReader {
 				HtmlDocumentBuilder b = new HtmlDocumentBuilder();
 				org.w3c.dom.Document doc = b.parse(response.getInputStream());
 				XPath xpath = XPathFactory.newInstance().newXPath();
+				final Element document = doc.getDocumentElement();
+				NodeList nodes = (NodeList) xpath.evaluate(xpathExpression, document, XPathConstants.NODESET);
 
-				NodeList nodes = (NodeList) xpath.evaluate(xpathExpression, doc.getDocumentElement(),
-						XPathConstants.NODESET);
-				LOGGER.info("childNodes  =" + (null != nodes ? nodes.getLength() : 0) + NL);
-
+				LOGGER.debug("childNodes  =" + (null != nodes ? nodes.getLength() : 0));
 				return nodes;
 			}
 
 		} catch (final IOException e) {
-			e.printStackTrace();
+			LOGGER.error(e.getMessage());
 		} catch (final SAXException e) {
-			e.printStackTrace();
+			LOGGER.error(e.getMessage());
 		} catch (XPathExpressionException e) {
-			e.printStackTrace();
+			LOGGER.error(e.getMessage());
 		}
 
 		return null;
 	}
 
-	public void crawlAllMyContacts() {
-		LOGGER.info("crawl all my contacts " + NL);
-		for (int offset = 0; offset < MAX_NUMBER_OF_DIRECT_CONTACT; offset += 10) {
-			final String contactURL = "https://www.xing.com/app/profile?op=contacts;name="+name+";offset="
-					+ offset;
-
-			// XPATH //*[@id="profile-contacts"]/tbody/tr[1]/td[2]/strong/a
-			String xpathExpression = "//*[@id=\"profile-contacts\"]/*[local-name()='tbody']/*[local-name()='tr']/*[local-name()='td']/*[local-name()='strong']/*[local-name()='a']";
-			NodeList nodes = readNodeListXING(contactURL, xpathExpression);
-			if (null != nodes) {
-				for (int i = 0; i < nodes.getLength(); i++) {
-					String name = nodes.item(i).getAttributes().getNamedItem("href").getNodeValue().split("/")[2];
-					myContacts.add(name);
-					LOGGER.info(i + " add '" + name + "'\n");
-				}
-
-			} else {
-				LOGGER.info("ready" + NL);
-				break;
-			}
-
-		}
-		LOGGER.info("crawled " + myContacts.size() + " contacts" + NL);
-	}
-
-	private void crawlAllMyIndirectContacts() {
-
-		for (String contact : myContacts) {
-			crawlInderectContacts(contact);
-		}
-
-	}
-
-	public void crawlInderectContacts(final String name) {
+	public void crawlInderectContacts(final String name, List<String> myContacts) {
 		// this site uses maximal 10 items per page
 		for (int offset = 0; offset < MAX_NUMBER_OF_DIRECT_CONTACT; offset += 10) {
-			LOGGER.info("crawl all contacts of " + name + NL);
+			LOGGER.info("crawl all inderect contacts of " + name);
 			final String ContactURL = "https://www.xing.com/app/profile?op=showroutes;except=1;name=" + name
 					+ ";offset=" + offset;
 
 			String xpathExpression = "//*[@id=\"maincontent\"]/*[local-name()='ul']";
-			final NodeList allElements = readNodeListXING(ContactURL, xpathExpression);
+			final NodeList allElements = crawlCurrentContacts(ContactURL, xpathExpression);
 			if (null != allElements) {
 				boolean hasPageinator = false;
 				for (int i = 0; i < allElements.getLength(); i++) {
@@ -249,7 +245,7 @@ public class XingPageReader {
 													.setClusterName(myContacts.contains(nodeValue) ? "Level-1-Contacts"
 															: "Level-" + col / 2 + "-Contacts");
 											listItems.add(entrySource);
-											LOGGER.info("found " + nodeValue + NL);
+											LOGGER.debug("found " + nodeValue);
 										}
 									}
 

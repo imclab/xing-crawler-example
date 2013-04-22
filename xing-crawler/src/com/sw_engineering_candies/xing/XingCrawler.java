@@ -48,17 +48,15 @@ public class XingCrawler {
 
 	private static final Log LOGGER = LogFactory.getLog(XingCrawler.class);
 
-	private static final String NL = System.getProperty("line.separator");
-
 	private static void startHTTPServer(final Model model) {
 		String hostname = "localhost";
 		try {
 			final InetAddress addr = InetAddress.getLocalHost();
 			hostname = addr.getCanonicalHostName();
 		} catch (final UnknownHostException e) {
-			LOGGER.error(e.getMessage() + NL);
+			LOGGER.error(e.getMessage() );
 		}
-		LOGGER.info("start for url: http://" + hostname + ':' + 8080 +"/index.html"+ NL);
+		LOGGER.info("start http://" + hostname + ':' + 8080 +"/index.html");
 		final Thread serverThread = new WebServer(8080, model);
 		serverThread.start();
 	}

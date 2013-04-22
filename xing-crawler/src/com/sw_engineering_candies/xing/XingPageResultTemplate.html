@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+	<head>
+    	<title>XING Crawler</title>
+    	<script type="text/javascript" src="http://mbostock.github.com/d3/d3.v2.js"></script>
+    	
+    	<style type="text/css"><!--
+		 rect.graphic-message{stroke:#FFF; fill:white; stroke:grey; stroke-width:1}
+		 text.graphic-text-message{font-family:helvetica; font-style: normal; font-size:10pt}		    
+		 text.graphic-text-small{font-family:helvetica; font-style: normal; font-size:8pt}		    
+	     text.graphic-text-large{font-family:helvetica; font-style: italic; font-size:12pt}		    
+	     line.graphic-link.inner{fill:none;stroke:#222;}
+		 line.graphic-link.outer{fill:none;stroke:#f33;}
+		--></style>
+ 	
+ 	<body>
+ 		<script type="text/javascript">
+   		var d3Nodes   = [];
+		var d3Texts   = [];
+		var d3Links   = [];
+		var d3Groups;		
+		var d3Force;
+		var d3Fill = d3.scale.category10();
+		var d3svg;
+		var d3InfoText;
+		var d3InfoTextGroup; 
+		var maxNodeIndex;
+		
+		// replace here data to be rendered in JSON format
+		var model = 
+			XX_MODEL_PLACE_HOLDER
+		
+		// parameter for rendering
+		var g_svgWidth = window.innerWidth-20;
+		var g_svgHeight =  window.innerHeight-20;
+		var g_forceGravity = 0.8;
+		var g_forceCharge = -1000;
+		var g_froceFriction = 0.4;		
+		var g_linkDistance = 200;
+		var g_multibleGravityFactor = 0.0025; 			 	
+				
+		run();			
+			
+		function run() {
+			prepareModel();			
+			d3svg = createSvg();
+			d3Force = createForce();
+		 	d3Groups = createGroups();
+			d3Links = createPaths();
+			d3Nodes = createNodes();
+			d3Texts = createTexts();
+			d3InfoTextGroup = createInfoTextGroup();
+			d3CreateOnTick();		
+			d3Force.start();
+		}   		
+		
+		function prepareModel() {	
+			// need this to find the clusters again
+			maxNodeIndex = model.nodes.length;		
+		
+			// create a node for each cluster 		
+			model.clusters.forEach(function(cluster) {
+				nodeId = model.nodes.length;
+				node =  {"id": nodeId, "clusterId": cluster.id, "name": cluster.name },
+				node.isCluster = true;
+				node.fixed = true;
+				if (cluster.id == 0) {
+					node.x = g_svgWidth/2; 
+					node.y = g_svgHeight/10;
+				} else if (cluster.id == 1) {
+					node.x = g_svgWidth-140; 
+					node.y = g_svgHeight-50;
+				} else {
+					node.x = 50; 
+					node.y = g_svgHeight-50;
+				}
+				model.nodes.push(node);
+			});
+	
+			// set initial position for all nodes
+			model.nodes.forEach(function(node) {
+				if (!node.isCluster) {
+					node.x = model.nodes[maxNodeIndex + node.clusterId].x+(Math.random()-0.6)*g_svgWidth/4;
+					node.y = model.nodes[maxNodeIndex + node.clusterId].y+(Math.random()-0.6)*g_svgHeight/4;		
+				}			
+			});	
+			
+			// link all nodes
+			model.links.forEach(function(link) {
+				link.source = model.nodes[link.sourceId];
+				link.target = model.nodes[link.targetId];	
+				if (link.target.clusterId == link.source.clusterId) {
+					link.type = "inner";
+				} else  {
+					link.type = "outer";
+				}
+			});
+		}
+		
+		function createSvg() {
+			return d3.select("body")
+				.append("svg:svg")
+				.attr("width", g_svgWidth)
+				.attr("height", g_svgHeight)
+				.attr("id", "svg-graphic");
+		}
+		
+		function createForce() {
+			return d3.layout.force() 
+				.nodes(model.nodes) 
+				.links(model.links) 
+				.gravity(g_forceGravity) 
+				.charge(g_forceCharge)
+				.linkDistance(g_linkDistance)
+				.friction(g_froceFriction)
+				.size([ g_svgWidth  , g_svgHeight ]);
+		}
+				
+		function createPaths() {		
+			return d3svg.selectAll("line.link")
+				.data(model.links).enter()
+				.insert("svg:line")
+				.attr("class", function(d) {return " graphic-link " + d.type;})
+			  	.attr("stroke-width", "0.5px" )    
+			    .attr("x1", function(d) { return d.source.x; })
+				.attr("y1", function(d) { return d.source.y; })
+				.attr("x2", function(d) { return d.target.x; })
+				.attr("y2", function(d) { return d.target.y; });
+		}
+		
+		function createGroups() {
+			return d3.nest()
+				.key(function(d) { return d.clusterId; })
+				.entries(model.nodes);	
+		}
+		
+		var groupPath = function(d) {
+    		return "M" + d3.geom.hull(d.values.map(function(i) { return [i.x, i.y];	})).join("L") + "Z";
+    	};
+    	
+		function createClusterBorder() {		
+			return d3svg.selectAll("path")
+    			.data(d3Groups)
+      			.attr("d", groupPath)
+    			.enter().insert("path", "circle")
+       			.style("fill", function(d, i)   { return d3Fill(i); })
+      			.style("stroke", function(d, i) { return d3Fill(i); })
+      			.style("stroke-width", 40)
+      			.style("stroke-linejoin", "round")
+      			.style("opacity", 0.3);
+		}
+		
+		function createNodes() {
+			return d3svg.selectAll("circle.node")
+		  		.data(model.nodes).enter()
+		  		.insert("svg:circle", "circle.cursor")
+			  	.attr("stroke-width", "1px")
+				.attr("stroke", function(d) {return d3Fill(d.clusterId);})
+				.attr("fill", function(d) {return (d.isCluster) ? d3Fill(d.clusterId) :"#FFF";})
+		        .attr("cx", function(d) { return d.x; })
+			    .attr("cy", function(d) { return d.y; })
+			    .text(function(d) {	return d.name; })	
+			  	.attr("r", 8.0)
+			  	.call(d3Force.drag);
+		}
+		
+		function createTexts() {
+			 return d3svg.selectAll("text.node")
+				.data(model.nodes).enter()
+				.append("svg:text")
+				.attr("dx", "1.0em")
+				.attr("dy", "+0.3em")
+				.attr("x", function(d) { return d.x; })
+			    .attr("y", function(d) { return d.y; })
+			    .attr("class", function(d) { return (d.isCluster) ? "graphic-text-large":"graphic-text-small";})
+			    .style("fill", function(d)   { return (d.isCluster) ? d3Fill(d.clusterId):"black"; })
+      		    .text(function(d) {	return d.name.split(' ')[0]; })
+      		 	.call(d3Force.drag);
+		}
+		
+		function createInfoTextGroup() {
+			var infoTextGroup = d3svg.append("svg:g")
+				.attr("visibility", "hidden");					
+			infoTextRect = infoTextGroup.append("svg:rect")
+				.attr("class", "graphic-message")
+				.attr("width", 130)
+				.attr("height", 20)
+				.attr("rx", 5)
+				.attr("ry", 5)
+				.attr("x", 10)
+				.attr("y", 10);			
+			infoText = infoTextGroup.append("svg:text")
+				.attr("x", 20)
+				.attr("y", 25)
+				.attr("class", "graphic-text-message")
+				.text(function(d) {return "info"});			
+			return infoTextGroup;
+		}
+								
+		function d3CreateOnTick() {
+			var tick_counter = 0;
+			var isTickReady = false;
+			
+			d3Force.on("tick", function(e) {
+			
+				// Push different nodes for each cluster in different directions
+				d3Nodes[0].forEach(function(o) {
+					var node = o.__data__;
+  			 		if (!node.isCluster) {
+  			 		    var cluster = d3Nodes[0][maxNodeIndex+node.clusterId].__data__;
+  			 			node.x = Math.min( g_svgWidth-60,  
+  			 					           Math.max(40, node.x + g_multibleGravityFactor*( cluster.x - node.x))); 			 					            
+  			 			node.y = Math.min( g_svgHeight-60, 
+  			 							   Math.max(40, node.y + g_multibleGravityFactor*( cluster.y - node.y))); 
+  			 			
+  					}
+  				});
+
+				// convex hull graph
+				createClusterBorder();
+				 
+				d3Nodes.attr("cx", function(d) { return d.x; })
+					   .attr("cy", function(d) { return d.y; });				
+				
+				d3Texts.attr("x", function(d) { return d.x;})
+					   .attr("y", function(d) { return d.y; });
+				
+				d3Links.attr("x1", function(d) { return d.source.x; })
+         			   .attr("y1", function(d) { return d.source.y; })
+         			   .attr("x2", function(d) { return d.target.x; })
+         			   .attr("y2", function(d) { return d.target.y; });		
+		
+				// show progress in percent
+				tick_counter++;
+				var num = new Number(tick_counter / 2.99);
+				if (tick_counter < 298) {
+					d3InfoTextGroup.attr("visibility", "visible");
+					var children = d3InfoTextGroup[0][0].lastChild.textContent = "Progress " + num.toFixed() + "%";
+				} else {
+					d3InfoTextGroup.attr("visibility", "hidden");
+				}
+			});
+		}	
+    	</script> 	
+    </body>
+</html>
